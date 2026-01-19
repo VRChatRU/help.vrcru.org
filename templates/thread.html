@@ -1,0 +1,60 @@
+﻿<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}} - {{site_title}}</title>
+  {{description_tag}}
+  {{canonical_tag}}
+  {{meta_extra}}
+  {{json_ld}}
+  <link rel="stylesheet" href="{{style_href}}">
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-header__inner">
+      <a href="/" class="site-header__brand">
+        <img src="https://vrcru.org/static/logo.svg" alt="VRChatRU logo" width="24" height="24">
+        <span>{{site_title}}</span>
+      </a>
+      <nav class="site-header__nav">
+        <a href="https://vrcru.org/discord" target="_blank" rel="noreferrer noopener">
+          <img src="https://vrcru.org/static/discord.svg" alt="" width="16" height="16">
+          Discord Сервер
+        </a>
+        <a href="https://t.me/vrcru" target="_blank" rel="noreferrer noopener">
+          <img src="https://vrcru.org/static/telegram.svg" alt="" width="16" height="16">
+          Telegram Форум
+        </a>
+        <a href="https://vrc.group/VRCRU.4111" target="_blank" rel="noreferrer noopener">
+          <img src="https://vrcru.org/static/group.svg" alt="" width="16" height="16">
+          VRChat Группа
+        </a>
+        <a href="https://vrcru.org/events" target="_blank" rel="noreferrer noopener">
+          <img src="https://vrcru.org/static/events.svg" alt="" width="16" height="16">
+          Ближайшие события
+        </a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <header class="thread-header">
+      <h1>{{thread_title}}</h1>
+      {{thread_tags}}
+    </header>
+    <nav class="discord-cta">
+      <a href="{{discord_url}}" target="_blank" rel="noreferrer noopener">
+        {{discord_button_text}}
+        <img src="https://vrcru.org/static/discord.svg" alt="" width="16" height="16">
+      </a>
+    </nav>
+    {{messages}}
+  </main>
+  <footer class="site-footer">
+    <div class="site-footer__inner">
+      <span>Связь с администратором сайта - <a href="mailto:vard@disroot.org">vard@disroot.org</a></span>
+      <span><a href="#" target="_blank" rel="noreferrer noopener">Исходный код</a></span>
+    </div>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "help.vrcru.org",
+  "module": "app.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "app": "bun run app.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "dependencies": {
+    "discord.js": "^14.19.0",
+    "markdown-it": "^14.1.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

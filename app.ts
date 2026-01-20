@@ -1230,7 +1230,9 @@ async function buildIndexPage(params: {
     .slice()
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
     .map((item) => {
-      const link = item.pageRelPath.replace(/\\/g, "/");
+      const link = item.pageRelPath
+        .replace(/\\/g, "/")
+        .replace(/\/index\.html$/, "/");
       return `    <li>
       <a href="${escapeHtml(link)}">${escapeHtml(item.title)}</a>
       <time datetime="${toIsoString(item.createdAt)}">${escapeHtml(

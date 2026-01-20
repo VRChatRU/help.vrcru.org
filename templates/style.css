@@ -167,6 +167,7 @@ body { padding-bottom: 56px; }
     justify-content: center;
     padding: 18px 0 32px;
   }
+  .discord-cta a { margin-bottom: 9px; }
   .discord-cta::before {
     content: "";
     position: fixed;

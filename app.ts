@@ -1232,7 +1232,7 @@ async function buildIndexPage(params: {
     .map((item) => {
       const link = item.pageRelPath
         .replace(/\\/g, "/")
-        .replace(/\/index\.html$/, "/");
+        .replace(/\/index\.html$/, "");
       return `    <li>
       <a href="${escapeHtml(link)}">${escapeHtml(item.title)}</a>
       <time datetime="${toIsoString(item.createdAt)}">${escapeHtml(

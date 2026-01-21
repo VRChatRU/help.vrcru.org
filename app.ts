@@ -1,5 +1,6 @@
-import { mkdir, rm, writeFile, readFile, readdir } from "node:fs/promises";
+import { mkdir, rm, writeFile, readFile, readdir, access } from "node:fs/promises";
 import path from "node:path";
+import { constants } from "node:fs";
 import {
   ChannelType,
   Client,
@@ -1321,6 +1322,24 @@ async function ensureStyleAsset(outputDir: string): Promise<void> {
   await writeFile(path.join(targetDir, "style.css"), style, "utf8");
 }
 
+async function ensureRobotsAsset(outputDir: string): Promise<void> {
+  const sourcePath = path.join(TEMPLATES_DIR, "robots.txt");
+  let robots: string;
+  try {
+    robots = await readFile(sourcePath, "utf8");
+  } catch {
+    return;
+  }
+  const targetPath = path.join(outputDir, "robots.txt");
+  try {
+    await access(targetPath, constants.F_OK);
+    return;
+  } catch {
+    // Not present, write it.
+  }
+  await writeFile(targetPath, robots, "utf8");
+}
+
 async function readLocalMeta(outputDir: string): Promise<PageMeta[]> {
   const threadsDir = path.join(outputDir, "threads");
   try {
@@ -1360,6 +1379,7 @@ async function run(): Promise<void> {
   await ensureDir(config.OUTPUT_DIR);
   const templates = await loadTemplates();
   await ensureStyleAsset(config.OUTPUT_DIR);
+  await ensureRobotsAsset(config.OUTPUT_DIR);
   console.log("Output:", config.OUTPUT_DIR);
   const runRebuild = hasArg("--rebuild");
 

@@ -1140,10 +1140,11 @@ async function buildThreadPage(params: {
     downloaded,
   });
 
-  const { descriptionTag } = buildMetaTags(excerpt);
+  const threadDescription = `${excerpt} (VRChat, врчат, вр чат, vr, вр)`;
+  const { descriptionTag } = buildMetaTags(threadDescription);
   const { metaExtra } = buildThreadMeta({
     title: thread.name,
-    description: excerpt,
+    description: threadDescription,
     ogImage,
   });
 

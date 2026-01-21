@@ -5,9 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{site_title}}</title>
   {{description_tag}}
-  {{canonical_tag}}
   {{meta_extra}}
-  {{json_ld}}
   <link rel="icon" href="https://vrcru.org/favicon.ico" sizes="any">
   <link rel="stylesheet" href="{{style_href}}">
 </head>
@@ -18,6 +16,10 @@
         <img src="https://vrcru.org/static/logo.svg" alt="VRChatRU logo" width="24" height="24">
         <span>{{site_title}}</span>
       </a>
+      <input class="site-header__menu-toggle" type="checkbox" id="menu-toggle">
+      <label class="site-header__menu-button" for="menu-toggle" aria-label="Меню">
+        <img src="https://vrcru.org/static/menu.svg" alt="" width="18" height="18">
+      </label>
       <nav class="site-header__nav">
         <a href="https://vrcru.org/discord" target="_blank" rel="noreferrer noopener">
           <img src="https://vrcru.org/static/discord.svg" alt="" width="16" height="16">
@@ -40,14 +42,25 @@
   </header>
   <main>
     <h1>{{title}}</h1>
-    <ol>
+    <p class="intro">
+      Это проект, который помогает быстрее находить полезную
+      информацию по VRChat на русском языке. Команда добровольцев (паблишеров) отбирает
+      полезные ветки и ответы из канала <a href="https://discord.com/channels/666306330230915093/1019662051825680404" target="_blank" rel="noreferrer noopener">#Помощь</a> Discord сервера VRChatRU и публикует их
+      здесь. Цель - собрать как можно больше ответов на частые вопросы по VRChat на русском
+      языке, чтобы их было легко найти через поисковые системы, тем самым упрощая доступ к
+      полезной информации как людям, так и нейросетям.
+    </p>
+    <ol class="thread-list">
 {{items}}
     </ol>
   </main>
   <footer class="site-footer">
     <div class="site-footer__inner">
-      <span>Связь с администратором сайта - <a href="mailto:vard@disroot.org">vard@disroot.org</a></span>
+      <span>Обновлено {{updated_at}}</span>
+      <span class="footer-sep">•</span>
       <span><a href="https://github.com/VRChatRU/help.vrcru.org" target="_blank" rel="noreferrer noopener">Исходный код</a></span>
+      <span class="footer-sep">•</span>
+      <span><a href="mailto:vard@disroot.org">Связь с администратором</a></span>
     </div>
   </footer>
 </body>

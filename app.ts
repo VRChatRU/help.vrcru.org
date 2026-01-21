@@ -8,6 +8,7 @@ import {
   type GuildMember,
   type Message,
   type ThreadChannel,
+  type User,
 } from "discord.js";
 import MarkdownIt from "markdown-it";
 
@@ -15,14 +16,13 @@ type EnvConfig = {
   BOT_TOKEN: string;
   GUILD_ID: string;
   FORUM_CHANNEL_ID: string;
-  PUBLISHER_ROLE_ID: string;
+  PUBLISHER_ROLE_IDS: string[];
   OUTPUT_DIR: string;
   BASE_URL?: string;
   PUBLISH_EMOJI: string;
   ANSWER_EMOJI: string;
   SITE_TITLE: string;
   SITE_DESCRIPTION: string;
-  SEO_KEYWORDS: string;
   LOG_CHANNEL_ID?: string;
 };
 
@@ -38,8 +38,6 @@ type Templates = {
   index: string;
   thread: string;
 };
-
-type LogLevel = "debug" | "info" | "warn" | "error";
 
 type AuthorProfile = {
   name: string;
@@ -81,28 +79,18 @@ const TEMPLATES_DIR = "templates";
 const DEFAULT_AUTHOR_COLOR = "#8b949e";
 const GROUP_WINDOW_MS = 10 * 60 * 1000;
 
-const logLevel: LogLevel = (process.env.LOG_LEVEL as LogLevel) ?? "info";
-
-function shouldLog(level: LogLevel): boolean {
-  const order: Record<LogLevel, number> = {
-    debug: 10,
-    info: 20,
-    warn: 30,
-    error: 40,
-  };
-  return order[level] >= order[logLevel];
-}
-
-function logDebug(message: string, ...args: unknown[]): void {
-  if (!shouldLog("debug")) return;
-  console.log(message, ...args);
-}
-
 function hasArg(name: string): boolean {
   return process.argv.includes(name);
 }
 
-function requireEnv(name: keyof EnvConfig, fallback?: string): string {
+function parseIdList(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function requireEnv(name: string, fallback?: string): string {
   const value = process.env[name] ?? fallback;
   if (!value) {
     throw new Error(`Missing required env var: ${name}`);
@@ -111,18 +99,21 @@ function requireEnv(name: keyof EnvConfig, fallback?: string): string {
 }
 
 function getConfig(): EnvConfig {
+  const publisherRoleIds = parseIdList(requireEnv("PUBLISHER_ROLE_ID"));
+  if (publisherRoleIds.length === 0) {
+    throw new Error("Missing required env var: PUBLISHER_ROLE_ID");
+  }
   return {
     BOT_TOKEN: requireEnv("BOT_TOKEN"),
     GUILD_ID: requireEnv("GUILD_ID"),
     FORUM_CHANNEL_ID: requireEnv("FORUM_CHANNEL_ID"),
-    PUBLISHER_ROLE_ID: requireEnv("PUBLISHER_ROLE_ID"),
+    PUBLISHER_ROLE_IDS: publisherRoleIds,
     OUTPUT_DIR: requireEnv("OUTPUT_DIR"),
     BASE_URL: process.env.BASE_URL,
     PUBLISH_EMOJI: requireEnv("PUBLISH_EMOJI"),
     ANSWER_EMOJI: requireEnv("ANSWER_EMOJI"),
     SITE_TITLE: requireEnv("SITE_TITLE"),
     SITE_DESCRIPTION: requireEnv("SITE_DESCRIPTION"),
-    SEO_KEYWORDS: requireEnv("SEO_KEYWORDS"),
     LOG_CHANNEL_ID: process.env.LOG_CHANNEL_ID,
   };
 }
@@ -138,6 +129,13 @@ function escapeHtml(value: string): string {
 
 function toIsoString(date: Date): string {
   return date.toISOString();
+}
+
+function formatDateTime(date: Date): string {
+  return new Intl.DateTimeFormat("ru-RU", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(date);
 }
 
 function truncateText(text: string, maxLen: number): string {
@@ -176,6 +174,34 @@ function looksLikeImageFile(name: string): boolean {
 
 function looksLikeVideoFile(name: string): boolean {
   return /\.(mp4|webm|mov|m4v)$/i.test(name);
+}
+
+function looksLikeAudioFile(name: string): boolean {
+  return /\.(mp3|ogg|wav|m4a|aac|flac)$/i.test(name);
+}
+
+function applyInlineEmojiSizing(html: string): string {
+  return html.replace(
+    /<img([^>]*?)src="([^"]*\/emojis\/[^"]+)"([^>]*)>/g,
+    (_match, before, src, after) => {
+      let attrs = `${before}src="${src}"${after}`;
+      if (/class="/.test(attrs)) {
+        attrs = attrs.replace(/class="([^"]*)"/, (m, cls) => {
+          if (cls.includes("inline-emoji")) return m;
+          return `class="${cls} inline-emoji"`;
+        });
+      } else {
+        attrs += ` class="inline-emoji"`;
+      }
+      if (!/width=/.test(attrs)) {
+        attrs += ` width="30"`;
+      }
+      if (!/height=/.test(attrs)) {
+        attrs += ` height="30"`;
+      }
+      return `<img${attrs}>`;
+    },
+  );
 }
 
 function isDefaultColor(color: string | null | undefined): boolean {
@@ -219,107 +245,43 @@ function renderTemplate(template: string, vars: Record<string, string>): string 
   });
 }
 
-function buildMetaTags(description?: string, canonical?: string): {
+function buildMetaTags(description?: string): {
   descriptionTag: string;
-  canonicalTag: string;
 } {
   const descriptionTag = description
     ? `<meta name="description" content="${escapeHtml(description)}">`
     : "";
-  const canonicalTag = canonical
-    ? `<link rel="canonical" href="${escapeHtml(canonical)}">`
-    : "";
-  return { descriptionTag, canonicalTag };
+  return { descriptionTag };
 }
 
 function buildIndexMeta(params: {
   title: string;
   description: string;
-  canonical?: string;
-  keywords: string;
-}): { metaExtra: string; jsonLd: string } {
-  const { title, description, canonical, keywords } = params;
+}): { metaExtra: string } {
+  const { title, description } = params;
   const tags = [
-    `<meta property="og:locale" content="ru_RU">`,
-    `<meta property="og:type" content="website">`,
     `<meta property="og:title" content="${escapeHtml(title)}">`,
     `<meta property="og:description" content="${escapeHtml(description)}">`,
-    `<meta name="keywords" content="${escapeHtml(keywords)}">`,
-    canonical
-      ? `<meta property="og:url" content="${escapeHtml(canonical)}">`
-      : "",
   ]
     .filter(Boolean)
     .join("\n  ");
-
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@type": "WebSite",
-    name: title,
-    description,
-    url: canonical ?? undefined,
-    keywords,
-  };
-
-  return {
-    metaExtra: tags ? `  ${tags}` : "",
-    jsonLd: `<script type="application/ld+json">${JSON.stringify(jsonLd)}</script>`,
-  };
+  return { metaExtra: tags ? `  ${tags}` : "" };
 }
 
 function buildThreadMeta(params: {
   title: string;
   description: string;
-  canonical?: string;
-  publishedAt: Date;
-  updatedAt: Date;
-  authorName?: string;
   ogImage?: string;
-  keywords: string;
-}): { metaExtra: string; jsonLd: string } {
-  const {
-    title,
-    description,
-    canonical,
-    publishedAt,
-    updatedAt,
-    authorName,
-    ogImage,
-    keywords,
-  } = params;
+}): { metaExtra: string } {
+  const { title, description, ogImage } = params;
   const tags = [
-    `<meta property="og:locale" content="ru_RU">`,
-    `<meta property="og:type" content="article">`,
     `<meta property="og:title" content="${escapeHtml(title)}">`,
     `<meta property="og:description" content="${escapeHtml(description)}">`,
-    `<meta name="keywords" content="${escapeHtml(keywords)}">`,
-    canonical
-      ? `<meta property="og:url" content="${escapeHtml(canonical)}">`
-      : "",
     ogImage ? `<meta property="og:image" content="${escapeHtml(ogImage)}">` : "",
-    `<meta property="article:published_time" content="${toIsoString(publishedAt)}">`,
-    `<meta property="article:modified_time" content="${toIsoString(updatedAt)}">`,
   ]
     .filter(Boolean)
     .join("\n  ");
-
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@type": "Article",
-    headline: title,
-    description,
-    datePublished: publishedAt.toISOString(),
-    dateModified: updatedAt.toISOString(),
-    author: authorName ? { "@type": "Person", name: authorName } : undefined,
-    mainEntityOfPage: canonical ? { "@type": "WebPage", "@id": canonical } : undefined,
-    image: ogImage ? [ogImage] : undefined,
-    keywords,
-  };
-
-  return {
-    metaExtra: tags ? `  ${tags}` : "",
-    jsonLd: `<script type="application/ld+json">${JSON.stringify(jsonLd)}</script>`,
-  };
+  return { metaExtra: tags ? `  ${tags}` : "" };
 }
 
 async function buildThreadTagsHtml(params: {
@@ -397,12 +359,20 @@ function logMissingStarterOnce(threadId: string, stage: string): void {
   );
 }
 
+function memberHasAnyRole(
+  member: GuildMember | null | undefined,
+  roleIds: string[],
+): boolean {
+  if (!member) return false;
+  return roleIds.some((roleId) => member.roles.cache.has(roleId));
+}
+
 async function isPublishableThread(params: {
   thread: ThreadChannel;
-  publisherRoleId: string;
+  publisherRoleIds: string[];
   publishEmoji: string;
 }): Promise<boolean> {
-  const { thread, publisherRoleId, publishEmoji } = params;
+  const { thread, publisherRoleIds, publishEmoji } = params;
   let starterMessage: Message | null = null;
   try {
     starterMessage = await thread.fetchStarterMessage();
@@ -436,24 +406,18 @@ async function isPublishableThread(params: {
     starterMessage.reactions.cache.find((entry) =>
       reactionMatches(entry.emoji, targetEmoji),
     ) ?? null;
-  if (!reaction) {
-    logDebug("[publish-check] missing publish emoji on thread", thread.id);
-    return false;
-  }
+  if (!reaction) return false;
 
   const users = await reaction.users.fetch();
-  logDebug("[publish-check] reaction users fetched", thread.id, users.size);
   for (const user of users.values()) {
     if (user.bot) continue;
     const member = await thread.guild.members
       .fetch(user.id)
       .catch(() => null);
-    if (member?.roles.cache.has(publisherRoleId)) {
-      logDebug("[publish-check] publisher role matched", thread.id, user.id);
+    if (memberHasAnyRole(member, publisherRoleIds)) {
       return true;
     }
   }
-  logDebug("[publish-check] no publisher role match", thread.id);
   return false;
 }
 
@@ -761,12 +725,20 @@ async function collectMessageAssets(params: {
       /\.gif$/i.test(attachment.name ?? "");
     const isVideo =
       attachment.contentType?.startsWith("video/") || looksLikeVideoFile(url);
+    const isAudio =
+      attachment.contentType?.startsWith("audio/") || looksLikeAudioFile(url);
 
     if (isVideo) {
       extraHtml.push(
         `<video controls preload="none"><source src="${escapeHtml(
           link,
         )}"></video>`,
+      );
+      continue;
+    }
+    if (isAudio) {
+      extraHtml.push(
+        `<audio controls preload="none" src="${escapeHtml(link)}"></audio>`,
       );
       continue;
     }
@@ -902,11 +874,11 @@ async function getAuthorProfile(params: {
 
 async function isAnswerMessage(params: {
   message: Message;
-  publisherRoleId: string;
+  publisherRoleIds: string[];
   answerEmoji: string;
   memberCache: Map<string, GuildMember | null>;
 }): Promise<boolean> {
-  const { message, publisherRoleId, answerEmoji, memberCache } = params;
+  const { message, publisherRoleIds, answerEmoji, memberCache } = params;
   const reaction =
     message.reactions.cache.find((entry) =>
       reactionMatches(entry.emoji, answerEmoji),
@@ -920,9 +892,9 @@ async function isAnswerMessage(params: {
       member = await message.guild?.members.fetch(user.id).catch(() => null);
       memberCache.set(user.id, member ?? null);
     }
-    if (member?.roles.cache.has(publisherRoleId)) {
-      return true;
-    }
+      if (memberHasAnyRole(member, publisherRoleIds)) {
+        return true;
+      }
   }
   return false;
 }
@@ -988,10 +960,9 @@ async function buildThreadPage(params: {
   outputDir: string;
   baseUrl?: string;
   templates: Templates;
-  publisherRoleId: string;
+  publisherRoleIds: string[];
   answerEmoji: string;
   publishEmoji: string;
-  siteKeywords: string;
   siteTitle: string;
 }): Promise<PageMeta> {
   const {
@@ -1000,10 +971,9 @@ async function buildThreadPage(params: {
     outputDir,
     baseUrl,
     templates,
-    publisherRoleId,
+    publisherRoleIds,
     answerEmoji,
     publishEmoji,
-    siteKeywords,
     siteTitle,
   } = params;
   const pageRelPath = getThreadPageRelPath(thread.id);
@@ -1012,9 +982,24 @@ async function buildThreadPage(params: {
   await ensureStyleAsset(outputDir);
 
   const markdown = new MarkdownIt({ html: false, linkify: true, breaks: true });
+  const defaultImage =
+    markdown.renderer.rules.image ??
+    ((tokens, idx, options, env, self) => self.renderToken(tokens, idx, options));
   const defaultLinkOpen =
     markdown.renderer.rules.link_open ??
     ((tokens, idx, options, env, self) => self.renderToken(tokens, idx, options));
+  markdown.renderer.rules.image = (tokens, idx, options, env, self) => {
+    const token = tokens[idx];
+    const alt = token.content ?? "";
+    if (alt.startsWith(":")) {
+      token.attrSet("class", "inline-emoji");
+      token.attrSet("width", "30");
+      token.attrSet("height", "30");
+      token.attrSet("loading", "lazy");
+      token.attrSet("decoding", "async");
+    }
+    return defaultImage(tokens, idx, options, env, self);
+  };
   markdown.renderer.rules.link_open = (tokens, idx, options, env, self) => {
     const token = tokens[idx];
     const href = token.attrGet("href") ?? "";
@@ -1070,6 +1055,7 @@ async function buildThreadPage(params: {
     }
     let htmlContent = markdown.render(messageMarkdown);
     htmlContent = applyMentionTokens(htmlContent, mentionTokens);
+    htmlContent = applyInlineEmojiSizing(htmlContent);
     const author = await getAuthorProfile({
       message,
       assetsRoot,
@@ -1079,12 +1065,12 @@ async function buildThreadPage(params: {
       memberCache,
       downloaded,
     });
-    const isAnswer = await isAnswerMessage({
-      message,
-      publisherRoleId,
-      answerEmoji,
-      memberCache,
-    });
+      const isAnswer = await isAnswerMessage({
+        message,
+        publisherRoleIds,
+        answerEmoji,
+        memberCache,
+      });
       const reactionsHtml = await buildReactionsHtml({
         message,
         assetsRoot,
@@ -1143,14 +1129,10 @@ async function buildThreadPage(params: {
   const starterText = starter?.content ?? "";
   const excerpt = truncateText(stripMarkdown(starterText), 180);
   const createdAt = thread.createdAt ?? new Date();
-  const updatedAt = messages[messages.length - 1]?.createdAt ?? createdAt;
-  const canonical =
-    baseUrl ? new URL(pageRelPath, baseUrl).toString() : undefined;
   const ogImage =
     baseUrl && imageCandidates.length > 0
       ? new URL(imageCandidates[0], baseUrl).toString()
       : undefined;
-  const starterAuthorName = starter?.author?.username ?? undefined;
   const tagsHtml = await buildThreadTagsHtml({
     thread,
     assetsRoot,
@@ -1158,16 +1140,11 @@ async function buildThreadPage(params: {
     downloaded,
   });
 
-  const { descriptionTag, canonicalTag } = buildMetaTags(excerpt, canonical);
-  const { metaExtra, jsonLd } = buildThreadMeta({
+  const { descriptionTag } = buildMetaTags(excerpt);
+  const { metaExtra } = buildThreadMeta({
     title: thread.name,
     description: excerpt,
-    canonical,
-    publishedAt: createdAt,
-    updatedAt,
-    authorName: starterAuthorName,
     ogImage,
-    keywords: siteKeywords,
   });
 
   const html = renderTemplate(templates.thread, {
@@ -1176,12 +1153,11 @@ async function buildThreadPage(params: {
     site_title: escapeHtml(siteTitle),
     thread_tags: tagsHtml,
     description_tag: descriptionTag,
-    canonical_tag: canonicalTag,
     meta_extra: metaExtra,
-    json_ld: jsonLd,
     messages: renderedGroups.join("\n"),
     discord_url: thread.url,
     discord_button_text: "Открыть в Discord",
+    updated_at: escapeHtml(formatDateTime(new Date())),
     style_href: "../../assets/style.css",
   });
 
@@ -1219,11 +1195,9 @@ async function deleteThreadOutput(outputDir: string, threadId: string): Promise<
 async function buildIndexPage(params: {
   outputDir: string;
   items: PageMeta[];
-  baseUrl?: string;
   templates: Templates;
   siteTitle: string;
   siteDescription: string;
-  siteKeywords: string;
 }): Promise<void> {
   await ensureStyleAsset(params.outputDir);
   const items = params.items
@@ -1243,27 +1217,18 @@ async function buildIndexPage(params: {
     })
     .join("\n");
 
-  const canonical = params.baseUrl
-    ? new URL("index.html", params.baseUrl).toString()
-    : undefined;
-  const { descriptionTag, canonicalTag } = buildMetaTags(
-    params.siteDescription,
-    canonical,
-  );
-  const { metaExtra, jsonLd } = buildIndexMeta({
+  const { descriptionTag } = buildMetaTags(params.siteDescription);
+  const { metaExtra } = buildIndexMeta({
     title: params.siteTitle,
     description: params.siteDescription,
-    canonical,
-    keywords: params.siteKeywords,
   });
   const indexHtml = renderTemplate(params.templates.index, {
     title: escapeHtml(params.siteTitle),
     site_title: escapeHtml(params.siteTitle),
     description_tag: descriptionTag,
-    canonical_tag: canonicalTag,
     meta_extra: metaExtra,
-    json_ld: jsonLd,
     items,
+    updated_at: escapeHtml(formatDateTime(new Date())),
     style_href: "assets/style.css",
   });
 
@@ -1297,6 +1262,11 @@ async function sendLogMessage(
   const channel = await getLogChannel(client, logChannelId);
   if (!channel) return;
   await channel.send({ content, allowedMentions: { users: [] } });
+}
+
+async function sendActorMessage(user: User | undefined, content: string) {
+  if (!user) return;
+  await user.send({ content, allowedMentions: { users: [] } }).catch(() => null);
 }
 
 async function buildReplyHtml(params: {
@@ -1389,7 +1359,7 @@ async function run(): Promise<void> {
   await ensureDir(config.OUTPUT_DIR);
   const templates = await loadTemplates();
   await ensureStyleAsset(config.OUTPUT_DIR);
-  console.log("[startup] output=", config.OUTPUT_DIR);
+  console.log("Output:", config.OUTPUT_DIR);
   const runRebuild = hasArg("--rebuild");
 
   const client = new Client({
@@ -1413,13 +1383,11 @@ async function run(): Promise<void> {
     await buildIndexPage({
       outputDir: config.OUTPUT_DIR,
       items: Array.from(pageIndex.values()),
-      baseUrl: config.BASE_URL,
       templates,
       siteTitle: config.SITE_TITLE,
       siteDescription: config.SITE_DESCRIPTION,
-      siteKeywords: config.SEO_KEYWORDS,
     });
-    console.log("[startup] index rebuilt from local meta", localMeta.length);
+    console.log("Index rebuilt from local meta:", localMeta.length);
   }
   let rebuildTimer: NodeJS.Timeout | null = null;
 
@@ -1427,31 +1395,28 @@ async function run(): Promise<void> {
     if (rebuildTimer) clearTimeout(rebuildTimer);
     rebuildTimer = setTimeout(() => {
       queue(async () => {
-        console.log("[index] rebuild start");
         await buildIndexPage({
           outputDir: config.OUTPUT_DIR,
           items: Array.from(pageIndex.values()),
-          baseUrl: config.BASE_URL,
           templates,
           siteTitle: config.SITE_TITLE,
           siteDescription: config.SITE_DESCRIPTION,
-          siteKeywords: config.SEO_KEYWORDS,
         });
-        console.log("[index] rebuild done");
+        console.log("Index updated.");
       });
     }, 200);
   };
 
   const generateThread = async (
     thread: ThreadChannel,
-    actor?: { id: string; tag: string },
+    actor?: { id: string; tag: string; user?: User },
     log = true,
   ) => {
-    console.log("[thread] generate start", thread.id);
+    console.log("Generate thread:", thread.id);
     try {
       const messages = await fetchAllMessages(thread);
       if (messages.length === 0) {
-        console.warn("[thread] no messages in thread", thread.id);
+        console.warn("Thread has no messages:", thread.id);
         return;
       }
       const pageInfo = await buildThreadPage({
@@ -1460,28 +1425,30 @@ async function run(): Promise<void> {
         outputDir: config.OUTPUT_DIR,
         baseUrl: config.BASE_URL,
         templates,
-        publisherRoleId: config.PUBLISHER_ROLE_ID,
+        publisherRoleIds: config.PUBLISHER_ROLE_IDS,
         answerEmoji: config.ANSWER_EMOJI,
         publishEmoji: config.PUBLISH_EMOJI,
-        siteKeywords: config.SEO_KEYWORDS,
         siteTitle: config.SITE_TITLE,
       });
       pageIndex.set(thread.id, pageInfo);
-      console.log("[thread] generate done", thread.id);
+      console.log("Thread generated:", thread.id);
       if (log) {
         const pageUrl = config.BASE_URL
           ? new URL(pageInfo.pageRelPath, config.BASE_URL).toString()
           : null;
-        const pageLine = pageUrl ? `Сайт: ${pageUrl}` : null;
-        const messageLine = `Discord: ${thread.url}`;
-        const actorLine = actor ? `Запустил: <@${actor.id}>` : null;
+        const pageLine = pageUrl ? `- [Открыть на сайте](${pageUrl})` : null;
+        const messageLine = `- [Открыть в Discord](${thread.url})`;
+        const actorLine = actor ? `- Добавил <@${actor.id}>` : null;
         const lines = [
-          `Страница создана: ${thread.name}`,
+          "**Страница сгенерирована ✅**",
+          `- "${thread.name}"`,
           pageLine,
           messageLine,
           actorLine,
         ].filter(Boolean);
-        await sendLogMessage(client, config.LOG_CHANNEL_ID, lines.join("\n"));
+        const content = lines.join("\n");
+        await sendLogMessage(client, config.LOG_CHANNEL_ID, content);
+        await sendActorMessage(actor?.user, content);
       }
       scheduleIndexRebuild();
     } catch (error) {
@@ -1491,28 +1458,34 @@ async function run(): Promise<void> {
 
   const removeThread = async (
     thread: ThreadChannel | { id: string; url?: string },
-    actor?: { id: string; tag: string },
+    actor?: { id: string; tag: string; user?: User },
     log = true,
   ) => {
-    console.log("[thread] remove", thread.id);
+    console.log("Thread removed:", thread.id);
     await deleteThreadOutput(config.OUTPUT_DIR, thread.id);
     pageIndex.delete(thread.id);
     if (log) {
-      const actorLine = actor ? `Запустил: <@${actor.id}>` : null;
-      const threadLine = thread.url ? `Discord: ${thread.url}` : null;
+      const threadTitle = "name" in thread ? thread.name : thread.id;
+      const actorLine = actor ? `- Удалил <@${actor.id}>` : null;
+      const threadLine = thread.url
+        ? `- [Открыть в Discord](${thread.url})`
+        : null;
       const lines = [
-        `Страница удалена: ${thread.id}`,
+        "**Страница удалена 🗑️**",
+        `- "${threadTitle}"`,
         threadLine,
         actorLine,
       ].filter(Boolean);
-      await sendLogMessage(client, config.LOG_CHANNEL_ID, lines.join("\n"));
+      const content = lines.join("\n");
+      await sendLogMessage(client, config.LOG_CHANNEL_ID, content);
+      await sendActorMessage(actor?.user, content);
     }
     scheduleIndexRebuild();
   };
 
   const syncAll = async (forumChannel: ThreadChannel["parent"]) => {
     if (!forumChannel || forumChannel.type !== ChannelType.GuildForum) return;
-    console.log("[sync] rebuild start");
+    console.log("Rebuild all threads.");
     await sendLogMessage(
       client,
       config.LOG_CHANNEL_ID,
@@ -1524,27 +1497,27 @@ async function run(): Promise<void> {
         .fetch(threadId)
         .catch(() => null);
       if (!thread) {
-        console.warn("[sync] thread not found", threadId);
+        console.warn("Thread not found:", threadId);
         continue;
       }
       await generateThread(thread, undefined, false);
     }
-    console.log(`[sync] rebuild done. threads=${threadIds.length}`);
+    console.log(`Rebuild done. threads=${threadIds.length}`);
   };
 
   const handleReady = async () => {
     try {
-      console.log("[ready] connected to Discord");
+      console.log("Connected to Discord.");
       const guild = await client.guilds.fetch(config.GUILD_ID);
       const channel = await guild.channels.fetch(config.FORUM_CHANNEL_ID);
       if (!channel || channel.type !== ChannelType.GuildForum) {
         throw new Error("Forum channel not found or not a forum channel.");
       }
-      console.log("[ready] forum loaded:", channel.id);
+      console.log("Forum loaded:", channel.id);
       if (runRebuild) {
         await syncAll(channel);
       }
-      console.log("[ready] waiting for publish reactions");
+      console.log("Waiting for publish reactions.");
       await sendLogMessage(
         client,
         config.LOG_CHANNEL_ID,
@@ -1558,20 +1531,14 @@ async function run(): Promise<void> {
 
   const handleReactionChange = async (
     thread: ThreadChannel,
-    actor?: { id: string; tag: string },
+    actor?: { id: string; tag: string; user?: User },
   ) => {
-    console.log("[reaction] check publishability", thread.id);
     try {
       const shouldPublish = await isPublishableThread({
         thread,
-        publisherRoleId: config.PUBLISHER_ROLE_ID,
+        publisherRoleIds: config.PUBLISHER_ROLE_IDS,
         publishEmoji: config.PUBLISH_EMOJI,
       });
-      console.log(
-        "[reaction] publish decision",
-        thread.id,
-        shouldPublish ? "publish" : "skip",
-      );
       if (shouldPublish) {
         await generateThread(thread, actor);
         return;
@@ -1589,7 +1556,7 @@ async function run(): Promise<void> {
         ? await reaction.message.fetch()
         : reaction.message;
     } catch (error) {
-      console.warn("[reaction-add] Failed to fetch message", error);
+      console.warn("Reaction add: failed to fetch message.", error);
       return;
     }
     if (!message) return;
@@ -1597,12 +1564,14 @@ async function run(): Promise<void> {
     const thread = message.channel as ThreadChannel;
     if (thread.parentId !== config.FORUM_CHANNEL_ID) return;
     if (!reactionMatches(reaction.emoji, config.PUBLISH_EMOJI)) return;
-    console.log("[reaction-add] publish emoji on thread", thread.id);
-    const actor = { id: user.id, tag: user.tag };
+    if (user.bot) return;
+    const member = await thread.guild.members.fetch(user.id).catch(() => null);
+    if (!memberHasAnyRole(member, config.PUBLISHER_ROLE_IDS)) {
+      return;
+    }
+    const actor = { id: user.id, tag: user.tag, user };
     await queue(async () => {
-      console.log("[reaction-add] task start", thread.id);
       await handleReactionChange(thread, actor);
-      console.log("[reaction-add] task done", thread.id);
     });
   });
 
@@ -1613,7 +1582,7 @@ async function run(): Promise<void> {
         ? await reaction.message.fetch()
         : reaction.message;
     } catch (error) {
-      console.warn("[reaction-remove] Failed to fetch message", error);
+      console.warn("Reaction remove: failed to fetch message.", error);
       return;
     }
     if (!message) return;
@@ -1621,12 +1590,14 @@ async function run(): Promise<void> {
     const thread = message.channel as ThreadChannel;
     if (thread.parentId !== config.FORUM_CHANNEL_ID) return;
     if (!reactionMatches(reaction.emoji, config.PUBLISH_EMOJI)) return;
-    console.log("[reaction-remove] publish emoji removed on thread", thread.id);
-    const actor = { id: user.id, tag: user.tag };
+    if (user.bot) return;
+    const member = await thread.guild.members.fetch(user.id).catch(() => null);
+    if (!memberHasAnyRole(member, config.PUBLISHER_ROLE_IDS)) {
+      return;
+    }
+    const actor = { id: user.id, tag: user.tag, user };
     await queue(async () => {
-      console.log("[reaction-remove] task start", thread.id);
       await handleReactionChange(thread, actor);
-      console.log("[reaction-remove] task done", thread.id);
     });
   });
 

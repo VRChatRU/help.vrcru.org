@@ -16,8 +16,7 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
-    "discord.js": "^14.19.0",
-    "markdown-it": "^14.1.0"
+    "discord.js": "^14.19.0"
   },
   "peerDependencies": {
     "typescript": "^5"

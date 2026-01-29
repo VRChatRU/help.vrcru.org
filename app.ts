@@ -11,7 +11,7 @@ import {
   type ThreadChannel,
   type User,
 } from "discord.js";
-import MarkdownIt from "markdown-it";
+// Bun.markdown встроен в Bun runtime, импорт не нужен
 
 // Импорты новых модулей
 import type { EnvConfig, PageMeta, Templates, AuthorProfile, MentionInfo, AssetResult, RenderedMessage, MessageGroup } from './src/types';
@@ -516,7 +516,7 @@ async function getAuthorProfile(params: {
 async function processAndGroupMessages(params: {
   messages: Message[];
   thread: ThreadChannel;
-  markdown: MarkdownIt;
+  markdownCallbacks: any;
   assetsRoot: string;
   assetRelPrefix: string;
   publisherRoleIds: string[];
@@ -531,7 +531,7 @@ async function processAndGroupMessages(params: {
   const {
     messages,
     thread,
-    markdown,
+    markdownCallbacks,
     assetsRoot,
     assetRelPrefix,
     publisherRoleIds,
@@ -570,7 +570,7 @@ async function processAndGroupMessages(params: {
       imageCandidates.push(...imageRels);
     }
 
-    let htmlContent = markdown.render(messageMarkdown);
+    let htmlContent = Bun.markdown.render(messageMarkdown, markdownCallbacks);
     htmlContent = applyMentionTokens(htmlContent, mentionTokens);
     htmlContent = applyInlineEmojiSizing(htmlContent);
 
@@ -652,57 +652,36 @@ async function processAndGroupMessages(params: {
 }
 
 // Настраивает markdown renderer с custom правилами для изображений и ссылок
-function setupMarkdownRenderer(): MarkdownIt {
-  const markdown = new MarkdownIt({ html: false, linkify: true, breaks: true });
+// Создаёт render callbacks для Bun.markdown с кастомными правилами
+function getMarkdownCallbacks() {
+  return {
+    // Изображения обёрнуты в ссылки с lazy loading
+    image: (children: string, meta: { src: string; alt: string; title?: string }) => {
+      const { src, alt, title } = meta;
+      const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
 
-  const defaultImage =
-    markdown.renderer.rules.image ??
-    ((tokens, idx, options, env, self) => self.renderToken(tokens, idx, options));
-  const defaultLinkOpen =
-    markdown.renderer.rules.link_open ??
-    ((tokens, idx, options, env, self) => self.renderToken(tokens, idx, options));
+      // Inline emoji определяются по alt text (начинается с ":")
+      if (alt.startsWith(":")) {
+        return `<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}"${titleAttr} class="inline-emoji" width="30" height="30" loading="lazy" decoding="async">`;
+      }
 
-  // Правило для inline emoji
-  markdown.renderer.rules.image = (tokens, idx, options, env, self) => {
-    const token = tokens[idx];
-    const alt = token.content ?? "";
-    if (alt.startsWith(":")) {
-      token.attrSet("class", "inline-emoji");
-      token.attrSet("width", "30");
-      token.attrSet("height", "30");
-      token.attrSet("loading", "lazy");
-      token.attrSet("decoding", "async");
-    }
-    return defaultImage(tokens, idx, options, env, self);
+      // Обычные изображения обёрнуты в ссылки
+      const img = `<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}"${titleAttr} loading="lazy" decoding="async">`;
+      return `<a href="${escapeHtml(src)}" target="_blank" rel="noopener">${img}</a>`;
+    },
+
+    // Внешние ссылки открываются в новой вкладке
+    a: (children: string, meta: { href: string; title?: string }) => {
+      const { href, title } = meta;
+      const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
+
+      if (/^https?:\/\//i.test(href)) {
+        return `<a href="${escapeHtml(href)}"${titleAttr} target="_blank" rel="noopener">${children}</a>`;
+      }
+
+      return `<a href="${escapeHtml(href)}"${titleAttr}>${children}</a>`;
+    },
   };
-
-  // Правило для внешних ссылок (target="_blank")
-  markdown.renderer.rules.link_open = (tokens, idx, options, env, self) => {
-    const token = tokens[idx];
-    const href = token.attrGet("href") ?? "";
-    if (/^https?:\/\//i.test(href)) {
-      token.attrSet("target", "_blank");
-      token.attrSet("rel", "noopener");
-    }
-    return defaultLinkOpen(tokens, idx, options, env, self);
-  };
-
-  // Правило для изображений (wrap в ссылку)
-  markdown.renderer.rules.image = (tokens, idx, options, env, self) => {
-    const token = tokens[idx];
-    const src = token.attrGet("src") ?? "";
-    const alt = token.content ?? token.attrGet("alt") ?? "";
-    const title = token.attrGet("title");
-    const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
-    const img = `<img src="${escapeHtml(src)}" alt="${escapeHtml(
-      alt,
-    )}"${titleAttr} loading="lazy" decoding="async">`;
-    return `<a href="${escapeHtml(
-      src,
-    )}" target="_blank" rel="noopener">${img}</a>`;
-  };
-
-  return markdown;
 }
 
 function renderGroupHtml(params: {
@@ -789,8 +768,8 @@ async function buildThreadPage(params: {
   await ensureDir(path.dirname(pagePath));
   await ensureStyleAsset(outputDir);
 
-  // Настроить markdown renderer с custom правилами
-  const markdown = setupMarkdownRenderer();
+  // Настроить markdown render callbacks с custom правилами
+  const markdownCallbacks = getMarkdownCallbacks();
   const assetsRoot = path.join(outputDir, "assets");
   const assetRelPrefix = "../../";
 
@@ -798,7 +777,7 @@ async function buildThreadPage(params: {
   const { renderedGroups, imageCandidates, downloaded } = await processAndGroupMessages({
     messages,
     thread,
-    markdown,
+    markdownCallbacks,
     assetsRoot,
     assetRelPrefix,
     publisherRoleIds,

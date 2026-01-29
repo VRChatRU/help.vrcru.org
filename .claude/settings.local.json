@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(test:*)",
+      "Bash(bun add:*)",
+      "Bash(git branch:*)",
+      "Bash(bun test:*)",
+      "Bash(bun build:*)",
+      "Bash(bun run:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}

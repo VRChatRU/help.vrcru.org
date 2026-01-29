@@ -512,6 +512,198 @@ async function getAuthorProfile(params: {
   return { name, color, avatarRel, roleIconRel };
 }
 
+// Обрабатывает и группирует сообщения треда
+async function processAndGroupMessages(params: {
+  messages: Message[];
+  thread: ThreadChannel;
+  markdown: MarkdownIt;
+  assetsRoot: string;
+  assetRelPrefix: string;
+  publisherRoleIds: string[];
+  answerEmoji: string;
+  publishEmoji: string;
+  rateLimiter: RateLimitedAPI;
+}): Promise<{
+  renderedGroups: string[];
+  imageCandidates: string[];
+}> {
+  const {
+    messages,
+    thread,
+    markdown,
+    assetsRoot,
+    assetRelPrefix,
+    publisherRoleIds,
+    answerEmoji,
+    publishEmoji,
+    rateLimiter,
+  } = params;
+
+  const downloaded = new Map<string, string>();
+  const avatarCache = new Map<string, string>();
+  const roleIconCache = new Map<string, string>();
+  const memberCache = new Map<string, GuildMember | null>();
+
+  const imageCandidates: string[] = [];
+  const groups: MessageGroup[] = [];
+
+  const messageById = new Map<string, Message>();
+  for (const message of messages) {
+    messageById.set(message.id, message);
+  }
+
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    const mentionMap = await buildMentionMap(message, memberCache);
+    const { markdown: messageMarkdown, extraHtml, imageRels, mentionTokens } =
+      await collectMessageAssets({
+        message,
+        threadId: thread.id,
+        assetsRoot,
+        assetRelPrefix,
+        downloaded,
+        mentionMap,
+      });
+
+    if (imageRels.length > 0) {
+      imageCandidates.push(...imageRels);
+    }
+
+    let htmlContent = markdown.render(messageMarkdown);
+    htmlContent = applyMentionTokens(htmlContent, mentionTokens);
+    htmlContent = applyInlineEmojiSizing(htmlContent);
+
+    const author = await getAuthorProfile({
+      message,
+      assetsRoot,
+      assetRelPrefix,
+      avatarCache,
+      roleIconCache,
+      memberCache,
+      downloaded,
+    });
+
+    const isAnswer = await isAnswerMessage({
+      message,
+      publisherRoleIds,
+      answerEmoji,
+      memberCache,
+      rateLimiter,
+    });
+
+    const reactionsHtml = await buildReactionsHtml({
+      message,
+      assetsRoot,
+      assetRelPrefix,
+      downloaded,
+      excludeEmojis: [publishEmoji, answerEmoji],
+    });
+
+    const replyHtml = await buildReplyHtml({
+      message,
+      messageById,
+      memberCache,
+    });
+
+    const rendered: RenderedMessage = {
+      messageId: message.id,
+      createdAt: message.createdAt ?? new Date(),
+      htmlContent,
+      extraHtml,
+      reactionsHtml,
+      isAnswer,
+      replyHtml,
+    };
+
+    const lastGroup = groups[groups.length - 1];
+    const lastMessage = lastGroup?.messages[lastGroup.messages.length - 1];
+    const prevMessage = index > 0 ? messages[index - 1] : null;
+    const canGroup =
+      lastGroup &&
+      lastMessage &&
+      prevMessage &&
+      isSameAuthor(message, prevMessage) &&
+      Math.abs(rendered.createdAt.getTime() - lastMessage.createdAt.getTime()) <=
+        GROUP_WINDOW_MS;
+
+    if (canGroup) {
+      lastGroup.messages.push(rendered);
+    } else {
+      groups.push({
+        author,
+        messages: [rendered],
+      });
+    }
+  }
+
+  const renderedGroups: string[] = [];
+  for (const group of groups) {
+    renderedGroups.push(
+      renderGroupHtml({
+        author: group.author,
+        assetRelPrefix,
+        messages: group.messages,
+      }),
+    );
+  }
+
+  return { renderedGroups, imageCandidates };
+}
+
+// Настраивает markdown renderer с custom правилами для изображений и ссылок
+function setupMarkdownRenderer(): MarkdownIt {
+  const markdown = new MarkdownIt({ html: false, linkify: true, breaks: true });
+
+  const defaultImage =
+    markdown.renderer.rules.image ??
+    ((tokens, idx, options, env, self) => self.renderToken(tokens, idx, options));
+  const defaultLinkOpen =
+    markdown.renderer.rules.link_open ??
+    ((tokens, idx, options, env, self) => self.renderToken(tokens, idx, options));
+
+  // Правило для inline emoji
+  markdown.renderer.rules.image = (tokens, idx, options, env, self) => {
+    const token = tokens[idx];
+    const alt = token.content ?? "";
+    if (alt.startsWith(":")) {
+      token.attrSet("class", "inline-emoji");
+      token.attrSet("width", "30");
+      token.attrSet("height", "30");
+      token.attrSet("loading", "lazy");
+      token.attrSet("decoding", "async");
+    }
+    return defaultImage(tokens, idx, options, env, self);
+  };
+
+  // Правило для внешних ссылок (target="_blank")
+  markdown.renderer.rules.link_open = (tokens, idx, options, env, self) => {
+    const token = tokens[idx];
+    const href = token.attrGet("href") ?? "";
+    if (/^https?:\/\//i.test(href)) {
+      token.attrSet("target", "_blank");
+      token.attrSet("rel", "noopener");
+    }
+    return defaultLinkOpen(tokens, idx, options, env, self);
+  };
+
+  // Правило для изображений (wrap в ссылку)
+  markdown.renderer.rules.image = (tokens, idx, options, env, self) => {
+    const token = tokens[idx];
+    const src = token.attrGet("src") ?? "";
+    const alt = token.content ?? token.attrGet("alt") ?? "";
+    const title = token.attrGet("title");
+    const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
+    const img = `<img src="${escapeHtml(src)}" alt="${escapeHtml(
+      alt,
+    )}"${titleAttr} loading="lazy" decoding="async">`;
+    return `<a href="${escapeHtml(
+      src,
+    )}" target="_blank" rel="noopener">${img}</a>`;
+  };
+
+  return markdown;
+}
+
 function renderGroupHtml(params: {
   author: AuthorProfile;
   assetRelPrefix: string;
@@ -596,150 +788,23 @@ async function buildThreadPage(params: {
   await ensureDir(path.dirname(pagePath));
   await ensureStyleAsset(outputDir);
 
-  const markdown = new MarkdownIt({ html: false, linkify: true, breaks: true });
-  const defaultImage =
-    markdown.renderer.rules.image ??
-    ((tokens, idx, options, env, self) => self.renderToken(tokens, idx, options));
-  const defaultLinkOpen =
-    markdown.renderer.rules.link_open ??
-    ((tokens, idx, options, env, self) => self.renderToken(tokens, idx, options));
-  markdown.renderer.rules.image = (tokens, idx, options, env, self) => {
-    const token = tokens[idx];
-    const alt = token.content ?? "";
-    if (alt.startsWith(":")) {
-      token.attrSet("class", "inline-emoji");
-      token.attrSet("width", "30");
-      token.attrSet("height", "30");
-      token.attrSet("loading", "lazy");
-      token.attrSet("decoding", "async");
-    }
-    return defaultImage(tokens, idx, options, env, self);
-  };
-  markdown.renderer.rules.link_open = (tokens, idx, options, env, self) => {
-    const token = tokens[idx];
-    const href = token.attrGet("href") ?? "";
-    if (/^https?:\/\//i.test(href)) {
-      token.attrSet("target", "_blank");
-      token.attrSet("rel", "noopener");
-    }
-    return defaultLinkOpen(tokens, idx, options, env, self);
-  };
-  markdown.renderer.rules.image = (tokens, idx, options, env, self) => {
-    const token = tokens[idx];
-    const src = token.attrGet("src") ?? "";
-    const alt = token.content ?? token.attrGet("alt") ?? "";
-    const title = token.attrGet("title");
-    const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
-    const img = `<img src="${escapeHtml(src)}" alt="${escapeHtml(
-      alt,
-    )}"${titleAttr} loading="lazy" decoding="async">`;
-    return `<a href="${escapeHtml(
-      src,
-    )}" target="_blank" rel="noopener">${img}</a>`;
-  };
+  // Настроить markdown renderer с custom правилами
+  const markdown = setupMarkdownRenderer();
   const assetsRoot = path.join(outputDir, "assets");
   const assetRelPrefix = "../../";
-  const downloaded = new Map<string, string>();
-  const avatarCache = new Map<string, string>();
-  const roleIconCache = new Map<string, string>();
-  const memberCache = new Map<string, GuildMember | null>();
 
-  const renderedGroups: string[] = [];
-  const imageCandidates: string[] = [];
-  const groups: MessageGroup[] = [];
-
-  const messageById = new Map<string, Message>();
-  for (const message of messages) {
-    messageById.set(message.id, message);
-  }
-
-  for (let index = 0; index < messages.length; index += 1) {
-    const message = messages[index];
-    const mentionMap = await buildMentionMap(message, memberCache);
-    const { markdown: messageMarkdown, extraHtml, imageRels, mentionTokens } =
-      await collectMessageAssets({
-        message,
-        threadId: thread.id,
-        assetsRoot,
-        assetRelPrefix,
-        downloaded,
-        mentionMap,
-      });
-    if (imageRels.length > 0) {
-      imageCandidates.push(...imageRels);
-    }
-    let htmlContent = markdown.render(messageMarkdown);
-    htmlContent = applyMentionTokens(htmlContent, mentionTokens);
-    htmlContent = applyInlineEmojiSizing(htmlContent);
-    const author = await getAuthorProfile({
-      message,
-      assetsRoot,
-      assetRelPrefix,
-      avatarCache,
-      roleIconCache,
-      memberCache,
-      downloaded,
-    });
-      const isAnswer = await isAnswerMessage({
-        message,
-        publisherRoleIds,
-        answerEmoji,
-        memberCache,
-        rateLimiter,
-      });
-      const reactionsHtml = await buildReactionsHtml({
-        message,
-        assetsRoot,
-        assetRelPrefix,
-        downloaded,
-        excludeEmojis: [publishEmoji, answerEmoji],
-      });
-
-    const replyHtml = await buildReplyHtml({
-      message,
-      messageById,
-      memberCache,
-    });
-
-    const rendered: RenderedMessage = {
-      messageId: message.id,
-      createdAt: message.createdAt ?? new Date(),
-      htmlContent,
-      extraHtml,
-      reactionsHtml,
-      isAnswer,
-      replyHtml,
-    };
-
-    const lastGroup = groups[groups.length - 1];
-    const lastMessage = lastGroup?.messages[lastGroup.messages.length - 1];
-    const prevMessage = index > 0 ? messages[index - 1] : null;
-    const canGroup =
-      lastGroup &&
-      lastMessage &&
-      prevMessage &&
-      isSameAuthor(message, prevMessage) &&
-      Math.abs(rendered.createdAt.getTime() - lastMessage.createdAt.getTime()) <=
-        GROUP_WINDOW_MS;
-    if (canGroup) {
-      lastGroup.messages.push(rendered);
-    } else {
-      groups.push({
-        author,
-        messages: [rendered],
-      });
-    }
-  }
-
-  for (const group of groups) {
-    renderedGroups.push(
-      renderGroupHtml({
-        author: group.author,
-        assetRelPrefix,
-        messages: group.messages,
-      }),
-    );
-  }
+  // Обработать и сгруппировать все сообщения треда
+  const { renderedGroups, imageCandidates } = await processAndGroupMessages({
+    messages,
+    thread,
+    markdown,
+    assetsRoot,
+    assetRelPrefix,
+    publisherRoleIds,
+    answerEmoji,
+    publishEmoji,
+    rateLimiter,
+  });
 
   const starter = messages[0];
   const starterText = starter?.content ?? "";

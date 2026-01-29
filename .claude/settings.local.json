@@ -8,7 +8,8 @@
       "Bash(bun test:*)",
       "Bash(bun build:*)",
       "Bash(bun run:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }

@@ -526,6 +526,7 @@ async function processAndGroupMessages(params: {
 }): Promise<{
   renderedGroups: string[];
   imageCandidates: string[];
+  downloaded: Map<string, string>;
 }> {
   const {
     messages,
@@ -647,7 +648,7 @@ async function processAndGroupMessages(params: {
     );
   }
 
-  return { renderedGroups, imageCandidates };
+  return { renderedGroups, imageCandidates, downloaded };
 }
 
 // Настраивает markdown renderer с custom правилами для изображений и ссылок
@@ -794,7 +795,7 @@ async function buildThreadPage(params: {
   const assetRelPrefix = "../../";
 
   // Обработать и сгруппировать все сообщения треда
-  const { renderedGroups, imageCandidates } = await processAndGroupMessages({
+  const { renderedGroups, imageCandidates, downloaded } = await processAndGroupMessages({
     messages,
     thread,
     markdown,

@@ -388,6 +388,64 @@ p { margin: 6px 0 0; color: var(--text); }
 .reaction em { font-style: normal; color: var(--muted); }
 .emoji { font-size: 1rem; line-height: 1; }
 
+/* Code styling */
+.body code {
+  font-family: "Consolas", "Monaco", "Courier New", monospace;
+  font-size: 0.9em;
+  background: rgba(13, 138, 255, 0.08);
+  color: #7dd3fc;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  border: 1px solid rgba(13, 138, 255, 0.12);
+  word-break: break-word;
+}
+
+.body pre {
+  background: #0a0d12;
+  border: 1px solid #1e2633;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin: 10px 0;
+  overflow-x: auto;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.body pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: #e5e7eb;
+  font-size: 0.88em;
+  line-height: 1.6;
+  display: block;
+}
+
+/* Scrollbar для code blocks */
+.body pre::-webkit-scrollbar {
+  height: 8px;
+}
+
+.body pre::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+.body pre::-webkit-scrollbar-thumb {
+  background: rgba(13, 138, 255, 0.3);
+  border-radius: 4px;
+}
+
+.body pre::-webkit-scrollbar-thumb:hover {
+  background: rgba(13, 138, 255, 0.5);
+}
+
+/* Подсветка для inline code внутри ссылок */
+.body a code {
+  color: #7dd3fc;
+  background: rgba(13, 138, 255, 0.15);
+  border-color: rgba(13, 138, 255, 0.25);
+}
+
 .site-footer {
   margin-top: 40px;
   border-top: 1px solid var(--border);

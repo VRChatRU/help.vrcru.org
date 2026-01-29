@@ -656,8 +656,10 @@ async function processAndGroupMessages(params: {
 function getMarkdownCallbacks() {
   return {
     // Изображения обёрнуты в ссылки с lazy loading
-    image: (children: string, meta: { src: string; alt: string; title?: string }) => {
-      const { src, alt, title } = meta;
+    image: (children: string, meta?: { src?: string; alt?: string; title?: string }) => {
+      const src = meta?.src ?? "";
+      const alt = meta?.alt ?? "";
+      const title = meta?.title;
       const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
 
       // Inline emoji определяются по alt text (начинается с ":")
@@ -671,8 +673,9 @@ function getMarkdownCallbacks() {
     },
 
     // Внешние ссылки открываются в новой вкладке
-    a: (children: string, meta: { href: string; title?: string }) => {
-      const { href, title } = meta;
+    a: (children: string, meta?: { href?: string; title?: string }) => {
+      const href = meta?.href ?? "";
+      const title = meta?.title;
       const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
 
       if (/^https?:\/\//i.test(href)) {

@@ -516,7 +516,6 @@ async function getAuthorProfile(params: {
 async function processAndGroupMessages(params: {
   messages: Message[];
   thread: ThreadChannel;
-  markdownCallbacks: any;
   assetsRoot: string;
   assetRelPrefix: string;
   publisherRoleIds: string[];
@@ -531,7 +530,6 @@ async function processAndGroupMessages(params: {
   const {
     messages,
     thread,
-    markdownCallbacks,
     assetsRoot,
     assetRelPrefix,
     publisherRoleIds,
@@ -570,7 +568,13 @@ async function processAndGroupMessages(params: {
       imageCandidates.push(...imageRels);
     }
 
-    let htmlContent = Bun.markdown.render(messageMarkdown, markdownCallbacks);
+    let htmlContent = Bun.markdown.html(messageMarkdown, {
+      tables: true,
+      strikethrough: true,
+      tasklists: true,
+      permissiveAutolinks: true,
+    });
+    htmlContent = postProcessMarkdownHtml(htmlContent);
     htmlContent = applyMentionTokens(htmlContent, mentionTokens);
     htmlContent = applyInlineEmojiSizing(htmlContent);
 
@@ -652,39 +656,38 @@ async function processAndGroupMessages(params: {
 }
 
 // Настраивает markdown renderer с custom правилами для изображений и ссылок
-// Создаёт render callbacks для Bun.markdown с кастомными правилами
-function getMarkdownCallbacks() {
-  return {
-    // Изображения обёрнуты в ссылки с lazy loading
-    image: (children: string, meta?: { src?: string; alt?: string; title?: string }) => {
-      const src = meta?.src ?? "";
-      const alt = meta?.alt ?? "";
-      const title = meta?.title;
-      const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
+// Post-process HTML для применения кастомных правил
+function postProcessMarkdownHtml(html: string): string {
+  // Добавить target="_blank" к внешним ссылкам
+  html = html.replace(
+    /<a href="(https?:\/\/[^"]+)"([^>]*)>/gi,
+    (match, href, rest) => {
+      // Проверяем, нет ли уже target="_blank"
+      if (rest.includes('target=')) return match;
+      return `<a href="${href}"${rest} target="_blank" rel="noopener">`;
+    }
+  );
 
+  // Обернуть изображения в ссылки (если ещё не обёрнуты)
+  html = html.replace(
+    /<img src="([^"]+)" alt="([^"]*)"([^>]*)>/g,
+    (match, src, alt, rest) => {
       // Inline emoji определяются по alt text (начинается с ":")
-      if (alt.startsWith(":")) {
-        return `<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}"${titleAttr} class="inline-emoji" width="30" height="30" loading="lazy" decoding="async">`;
+      if (alt.startsWith(':')) {
+        // Добавить класс и размеры для inline emoji
+        if (!rest.includes('class=')) {
+          return `<img src="${src}" alt="${alt}"${rest} class="inline-emoji" width="30" height="30" loading="lazy" decoding="async">`;
+        }
+        return match;
       }
 
-      // Обычные изображения обёрнуты в ссылки
-      const img = `<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}"${titleAttr} loading="lazy" decoding="async">`;
-      return `<a href="${escapeHtml(src)}" target="_blank" rel="noopener">${img}</a>`;
-    },
+      // Обычные изображения - обернуть в ссылку
+      const img = `<img src="${src}" alt="${alt}"${rest} loading="lazy" decoding="async">`;
+      return `<a href="${src}" target="_blank" rel="noopener">${img}</a>`;
+    }
+  );
 
-    // Внешние ссылки открываются в новой вкладке
-    a: (children: string, meta?: { href?: string; title?: string }) => {
-      const href = meta?.href ?? "";
-      const title = meta?.title;
-      const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
-
-      if (/^https?:\/\//i.test(href)) {
-        return `<a href="${escapeHtml(href)}"${titleAttr} target="_blank" rel="noopener">${children}</a>`;
-      }
-
-      return `<a href="${escapeHtml(href)}"${titleAttr}>${children}</a>`;
-    },
-  };
+  return html;
 }
 
 function renderGroupHtml(params: {
@@ -771,8 +774,7 @@ async function buildThreadPage(params: {
   await ensureDir(path.dirname(pagePath));
   await ensureStyleAsset(outputDir);
 
-  // Настроить markdown render callbacks с custom правилами
-  const markdownCallbacks = getMarkdownCallbacks();
+  // Настроить assets пути
   const assetsRoot = path.join(outputDir, "assets");
   const assetRelPrefix = "../../";
 
@@ -780,7 +782,6 @@ async function buildThreadPage(params: {
   const { renderedGroups, imageCandidates, downloaded } = await processAndGroupMessages({
     messages,
     thread,
-    markdownCallbacks,
     assetsRoot,
     assetRelPrefix,
     publisherRoleIds,

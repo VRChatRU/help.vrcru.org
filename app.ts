@@ -554,7 +554,7 @@ async function processAndGroupMessages(params: {
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index];
     const mentionMap = await buildMentionMap(message, memberCache);
-    const { markdown: messageMarkdown, extraHtml, imageRels, mentionTokens } =
+    const { markdown: rawMarkdown, extraHtml, imageRels, mentionTokens } =
       await collectMessageAssets({
         message,
         threadId: thread.id,
@@ -567,6 +567,9 @@ async function processAndGroupMessages(params: {
     if (imageRels.length > 0) {
       imageCandidates.push(...imageRels);
     }
+
+    // Pre-process markdown для корректной работы с code blocks
+    const messageMarkdown = preprocessMarkdown(rawMarkdown);
 
     let htmlContent = Bun.markdown.html(messageMarkdown, {
       tables: true,
@@ -656,6 +659,22 @@ async function processAndGroupMessages(params: {
 }
 
 // Настраивает markdown renderer с custom правилами для изображений и ссылок
+// Pre-process markdown для корректной работы с code blocks
+function preprocessMarkdown(markdown: string): string {
+  // Простой подход: найти все code blocks и убедиться что они окружены пустыми строками
+
+  // 1. Разделить слитый текст и ```
+  markdown = markdown.replace(/([^\n])(```)/g, '$1\n\n$2');
+
+  // 2. Убедиться что после ``` (в конце блока) есть пустая строка перед текстом
+  markdown = markdown.replace(/(```)\n(?!\n|```|$)/g, '$1\n\n');
+
+  // 3. Убедиться что перед ``` (в начале блока) есть пустая строка после текста
+  markdown = markdown.replace(/(?<!\n\n)(\n)(```)/g, '\n\n$2');
+
+  return markdown;
+}
+
 // Post-process HTML для применения кастомных правил
 function postProcessMarkdownHtml(html: string): string {
   // Добавить target="_blank" к внешним ссылкам

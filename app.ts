@@ -661,18 +661,26 @@ async function processAndGroupMessages(params: {
 // Настраивает markdown renderer с custom правилами для изображений и ссылок
 // Pre-process markdown для корректной работы с code blocks
 function preprocessMarkdown(markdown: string): string {
-  // Простой подход: найти все code blocks и убедиться что они окружены пустыми строками
+  // Исправляем проблемы с code blocks для корректного парсинга
 
-  // 1. Разделить слитый текст и ```
-  markdown = markdown.replace(/([^\n])(```)/g, '$1\n\n$2');
+  // 1. Исправить ```{ -> ```\n{ (когда код начинается с не-буквы)
+  // Language identifiers это только буквы, поэтому если после ``` идёт не-буква - это код
+  markdown = markdown.replace(/```([^a-z\n\s])/gi, '```\n$1');
 
-  // 2. Убедиться что после ``` (в конце блока) есть пустая строка перед текстом
-  markdown = markdown.replace(/(```)\n(?!\n|```|$)/g, '$1\n\n');
+  // 2. Добавить \n перед закрывающим ``` (если это не начало строки)
+  markdown = markdown.replace(/([^\n])(```)(\n|$)/g, '$1\n$2$3');
 
-  // 3. Убедиться что перед ``` (в начале блока) есть пустая строка после текста
-  markdown = markdown.replace(/(?<!\n\n)(\n)(```)/g, '\n\n$2');
+  // 3. Убедиться что вокруг code blocks есть пустые строки
+  // Перед открывающим ```
+  markdown = markdown.replace(/([^\n])\n(```[a-z]*\n)/gi, '$1\n\n$2');
 
-  return markdown;
+  // После закрывающего ```
+  markdown = markdown.replace(/(```)\n([^\n])/g, '$1\n\n$2');
+
+  // 4. Очистить избыточные пустые строки (3+ подряд)
+  markdown = markdown.replace(/\n{3,}/g, '\n\n');
+
+  return markdown.trim();
 }
 
 // Post-process HTML для применения кастомных правил

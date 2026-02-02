@@ -513,6 +513,7 @@ async function processAndGroupMessages(params: {
   renderedGroups: string[];
   imageCandidates: string[];
   downloaded: Map<string, string>;
+  answerIds: string[];
 }> {
   const {
     messages,
@@ -531,6 +532,7 @@ async function processAndGroupMessages(params: {
   const memberCache = new Map<string, GuildMember | null>();
 
   const imageCandidates: string[] = [];
+  const answerIds: string[] = [];
   const groups: MessageGroup[] = [];
 
   const messageById = new Map<string, Message>();
@@ -585,6 +587,10 @@ async function processAndGroupMessages(params: {
       memberCache,
       rateLimiter,
     });
+
+    if (isAnswer) {
+      answerIds.push(message.id);
+    }
 
     const reactionsHtml = await buildReactionsHtml({
       message,
@@ -642,7 +648,7 @@ async function processAndGroupMessages(params: {
     );
   }
 
-  return { renderedGroups, imageCandidates, downloaded };
+  return { renderedGroups, imageCandidates, downloaded, answerIds };
 }
 
 // Настраивает markdown renderer с custom правилами для изображений и ссылок
@@ -792,7 +798,7 @@ async function buildThreadPage(params: {
   const assetRelPrefix = "../../";
 
   // Обработать и сгруппировать все сообщения треда
-  const { renderedGroups, imageCandidates, downloaded } = await processAndGroupMessages({
+  const { renderedGroups, imageCandidates, downloaded, answerIds } = await processAndGroupMessages({
     messages,
     thread,
     assetsRoot,
@@ -826,6 +832,22 @@ async function buildThreadPage(params: {
     ogImage,
   });
 
+  // Создать навигацию по ответам если они есть
+  let messagesHtml = renderedGroups.join("\n");
+  if (answerIds.length > 0) {
+    const answerLinks = answerIds
+      .map((id, index) => `<a href="#m-${escapeHtml(id)}">Ответ ${index + 1}</a>`)
+      .join("");
+    const answersNav = `<nav class="answers-nav">
+  <span>Ответы:</span>
+  ${answerLinks}
+</nav>`;
+
+    // Вставить навигацию после первой группы
+    const firstGroupEnd = renderedGroups[0].length;
+    messagesHtml = renderedGroups[0] + "\n" + answersNav + "\n" + renderedGroups.slice(1).join("\n");
+  }
+
   const html = renderTemplate(templates.thread, {
     title: escapeHtml(thread.name),
     thread_title: escapeHtml(thread.name),
@@ -833,7 +855,7 @@ async function buildThreadPage(params: {
     thread_tags: tagsHtml,
     description_tag: descriptionTag,
     meta_extra: metaExtra,
-    messages: renderedGroups.join("\n"),
+    messages: messagesHtml,
     discord_url: thread.url,
     discord_button_text: "Открыть в Discord",
     updated_at: escapeHtml(formatDateTime(new Date())),

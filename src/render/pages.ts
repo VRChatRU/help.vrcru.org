@@ -88,8 +88,7 @@ export async function buildIndexPage(params: {
   // Копируем style.css
   await ensureStyleAsset(params.outputDir);
 
-  const items = params.items
-    .slice()
+  const items = [...params.items]
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
     .map((item) => {
       const link = item.pageRelPath

@@ -186,50 +186,48 @@ async function buildReactionsHtml(params: {
 }): Promise<string> {
   const { message, assetsRoot, assetRelPrefix, downloaded, excludeEmojis } = params;
   if (message.reactions.cache.size === 0) return "";
-  const parts: string[] = [];
-  for (const reaction of message.reactions.cache.values()) {
-    const count = reaction.count ?? 0;
-    if (count <= 0) continue;
-    if (
-      excludeEmojis.some((emoji) => reactionMatches(reaction.emoji, emoji))
-    ) {
-      continue;
-    }
-    const emoji = reaction.emoji;
-    if (emoji.id) {
-      const ext = emoji.animated ? "gif" : "png";
-      const url = `https://cdn.discordapp.com/emojis/${emoji.id}.${ext}`;
-      const fileName = `emoji-${emoji.id}.${ext}`;
-      const localRel = await downloadAsset({
-        url,
-        assetsRoot: path.join(assetsRoot, "emojis"),
-        assetRelDir: path.join("assets", "emojis"),
-        fileName,
-        downloaded,
-      });
-      if (localRel) {
-        parts.push(
-          `<span class="reaction"><img src="${escapeHtml(
+
+  const reactionPromises = Array.from(message.reactions.cache.values())
+    .filter(reaction => {
+      const count = reaction.count ?? 0;
+      if (count <= 0) return false;
+      return !excludeEmojis.some(emoji => reactionMatches(reaction.emoji, emoji));
+    })
+    .map(async (reaction) => {
+      const count = reaction.count ?? 0;
+      const emoji = reaction.emoji;
+
+      if (emoji.id) {
+        const ext = emoji.animated ? "gif" : "png";
+        const url = `https://cdn.discordapp.com/emojis/${emoji.id}.${ext}`;
+        const fileName = `emoji-${emoji.id}.${ext}`;
+        const localRel = await downloadAsset({
+          url,
+          assetsRoot: path.join(assetsRoot, "emojis"),
+          assetRelDir: path.join("assets", "emojis"),
+          fileName,
+          downloaded,
+        });
+        if (localRel) {
+          return `<span class="reaction"><img src="${escapeHtml(
             `${assetRelPrefix}${localRel}`,
           )}" alt="${escapeHtml(
             emoji.name ?? "emoji",
-          )}" width="18" height="18" loading="lazy" decoding="async"><em>${count}</em></span>`,
-        );
-      } else if (emoji.name) {
-        parts.push(
-          `<span class="reaction"><span class="emoji">${escapeHtml(
+          )}" width="18" height="18" loading="lazy" decoding="async"><em>${count}</em></span>`;
+        } else if (emoji.name) {
+          return `<span class="reaction"><span class="emoji">${escapeHtml(
             emoji.name,
-          )}</span><em>${count}</em></span>`,
-        );
-      }
-    } else if (emoji.name) {
-      parts.push(
-        `<span class="reaction"><span class="emoji">${escapeHtml(
+          )}</span><em>${count}</em></span>`;
+        }
+      } else if (emoji.name) {
+        return `<span class="reaction"><span class="emoji">${escapeHtml(
           emoji.name,
-        )}</span><em>${count}</em></span>`,
-      );
-    }
-  }
+        )}</span><em>${count}</em></span>`;
+      }
+      return "";
+    });
+
+  const parts = (await Promise.all(reactionPromises)).filter(Boolean);
   if (parts.length === 0) return "";
   return `<div class="reactions">${parts.join("")}</div>`;
 }

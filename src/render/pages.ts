@@ -83,6 +83,7 @@ export async function buildIndexPage(params: {
   templates: Templates;
   siteTitle: string;
   siteDescription: string;
+  baseUrl?: string;
 }): Promise<void> {
   // Копируем style.css
   await ensureStyleAsset(params.outputDir);
@@ -121,6 +122,15 @@ export async function buildIndexPage(params: {
   });
 
   await writeFile(path.join(params.outputDir, "index.html"), indexHtml, "utf8");
+
+  // Генерируем sitemap если есть baseUrl
+  if (params.baseUrl) {
+    await generateSitemap({
+      outputDir: params.outputDir,
+      baseUrl: params.baseUrl,
+      items: params.items,
+    });
+  }
 }
 
 // Копирует style.css в output директорию
@@ -130,6 +140,41 @@ export async function ensureStyleAsset(outputDir: string): Promise<void> {
   const targetDir = path.join(outputDir, "assets");
   await ensureDir(targetDir);
   await writeFile(path.join(targetDir, "style.css"), style, "utf8");
+}
+
+/**
+ * Генерирует sitemap.xml
+ */
+export async function generateSitemap(params: {
+  outputDir: string;
+  baseUrl: string;
+  items: PageMeta[];
+}): Promise<void> {
+  const { outputDir, baseUrl, items } = params;
+
+  const urls = [
+    `  <url>
+    <loc>${escapeHtml(baseUrl)}</loc>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>`,
+    ...items.map(item => {
+      const url = `${baseUrl}/${item.pageRelPath.replace(/\\/g, '/').replace(/\/index\.html$/, '')}`;
+      return `  <url>
+    <loc>${escapeHtml(url)}</loc>
+    <lastmod>${toIsoString(item.createdAt).split('T')[0]}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>`;
+    })
+  ].join('\n');
+
+  const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls}
+</urlset>`;
+
+  await writeFile(path.join(outputDir, 'sitemap.xml'), sitemap, 'utf8');
 }
 
 // Читает локальные метаданные из threads/*/meta.json

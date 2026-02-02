@@ -44,7 +44,7 @@ import {
   isPublishableThread,
   isAnswerMessage
 } from './src/discord/permissions';
-import { loadTemplates, renderTemplate, buildMetaTags, buildIndexMeta, buildThreadMeta, buildIndexPage, ensureStyleAsset, readLocalMeta } from './src/render/pages';
+import { loadTemplates, renderTemplate, buildMetaTags, buildIndexMeta, buildThreadMeta, buildIndexPage, ensureStyleAsset, readLocalMeta, generateSitemap } from './src/render/pages';
 
 // Удалённые функции теперь импортируются из модулей
 
@@ -1101,6 +1101,7 @@ async function run(): Promise<void> {
       templates,
       siteTitle: config.SITE_TITLE,
       siteDescription: config.SITE_DESCRIPTION,
+      baseUrl: config.BASE_URL,
     });
     console.log("Index rebuilt from local meta:", localMeta.length);
   }
@@ -1116,6 +1117,7 @@ async function run(): Promise<void> {
           templates,
           siteTitle: config.SITE_TITLE,
           siteDescription: config.SITE_DESCRIPTION,
+          baseUrl: config.BASE_URL,
         });
         console.log("Index updated.");
       });

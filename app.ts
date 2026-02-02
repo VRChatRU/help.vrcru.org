@@ -1090,8 +1090,9 @@ async function run(): Promise<void> {
       config.LOG_CHANNEL_ID,
       "Запущена перегенерация всех страниц.",
     );
-    const threadIds = await readLocalThreadIds(config.OUTPUT_DIR);
-    for (const threadId of threadIds) {
+    const metas = await readLocalMeta(config.OUTPUT_DIR);
+    for (const meta of metas) {
+      const threadId = meta.threadId;
       const thread = await forumChannel.threads
         .fetch(threadId)
         .catch(() => null);
@@ -1101,7 +1102,7 @@ async function run(): Promise<void> {
       }
       await generateThread(thread, undefined, false);
     }
-    console.log(`Rebuild done. threads=${threadIds.length}`);
+    console.log(`Rebuild done. threads=${metas.length}`);
   };
 
   const handleReady = async () => {

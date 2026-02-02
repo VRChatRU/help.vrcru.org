@@ -122,12 +122,16 @@ export async function buildIndexPage(params: {
 
   await writeFile(path.join(params.outputDir, "index.html"), indexHtml, "utf8");
 
-  // Генерируем sitemap если есть baseUrl
+  // Генерируем sitemap и robots.txt если есть baseUrl
   if (params.baseUrl) {
     await generateSitemap({
       outputDir: params.outputDir,
       baseUrl: params.baseUrl,
       items: params.items,
+    });
+    await generateRobotsTxt({
+      outputDir: params.outputDir,
+      baseUrl: params.baseUrl,
     });
   }
 }
@@ -151,9 +155,15 @@ export async function generateSitemap(params: {
 }): Promise<void> {
   const { outputDir, baseUrl, items } = params;
 
+  // Дата последнего треда для главной страницы
+  const latestDate = items.length > 0
+    ? items.reduce((latest, item) => item.createdAt > latest ? item.createdAt : latest, items[0].createdAt)
+    : new Date();
+
   const urls = [
     `  <url>
     <loc>${escapeHtml(baseUrl)}</loc>
+    <lastmod>${toIsoString(latestDate).split('T')[0]}</lastmod>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
   </url>`,
@@ -174,6 +184,23 @@ ${urls}
 </urlset>`;
 
   await writeFile(path.join(outputDir, 'sitemap.xml'), sitemap, 'utf8');
+}
+
+/**
+ * Генерирует robots.txt
+ */
+export async function generateRobotsTxt(params: {
+  outputDir: string;
+  baseUrl: string;
+}): Promise<void> {
+  const { outputDir, baseUrl } = params;
+
+  const robotsTxt = `User-agent: *
+Allow: /
+
+Sitemap: ${baseUrl}/sitemap.xml`;
+
+  await writeFile(path.join(outputDir, 'robots.txt'), robotsTxt, 'utf8');
 }
 
 // Читает локальные метаданные из threads/*/meta.json

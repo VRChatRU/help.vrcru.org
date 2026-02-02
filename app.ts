@@ -1,6 +1,5 @@
-import { writeFile, readFile, access } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import path from "node:path";
-import { constants } from "node:fs";
 import {
   ChannelType,
   Client,
@@ -44,8 +43,6 @@ import {
   isAnswerMessage
 } from './src/discord/permissions';
 import { loadTemplates, renderTemplate, buildMetaTags, buildIndexMeta, buildThreadMeta, buildIndexPage, readLocalMeta } from './src/render/pages';
-
-// Удалённые функции теперь импортируются из модулей
 
 async function buildThreadTagsHtml(params: {
   thread: ThreadChannel;
@@ -267,7 +264,9 @@ function replaceMentionsWithTokens(params: {
       info.color,
     )}">@${escapeHtml(info.name)}</span>`;
     tokens.set(token, html);
-    result = result.replace(new RegExp(`<@!?${id}>`, "g"), token);
+    // Экранируем ID для безопасности (защита от regex injection)
+    const escapedId = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    result = result.replace(new RegExp(`<@!?${escapedId}>`, "g"), token);
   }
   return { text: result, tokens };
 }

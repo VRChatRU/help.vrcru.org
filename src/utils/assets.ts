@@ -19,6 +19,17 @@ export async function deleteDir(dirPath: string): Promise<void> {
  * Скачивает файл по URL и сохраняет на диск
  */
 export async function downloadToFile(url: string, destPath: string): Promise<void> {
+  // Валидация URL - только Discord CDN (защита от SSRF)
+  const allowedHosts = ['cdn.discordapp.com', 'media.discordapp.net'];
+  try {
+    const urlObj = new URL(url);
+    if (!allowedHosts.includes(urlObj.hostname)) {
+      throw new Error(`URL host not allowed: ${urlObj.hostname}`);
+    }
+  } catch (error) {
+    throw new Error(`Invalid URL: ${url}`);
+  }
+
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to download ${url}: ${response.status}`);

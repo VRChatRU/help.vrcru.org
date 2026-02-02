@@ -67,7 +67,10 @@ export function normalizeGifLinks(text: string): string {
  * Очищает имя файла от недопустимых символов
  */
 export function sanitizeFilename(name: string): string {
-  const trimmed = name.trim().replace(/[/\\?%*:|"<>]/g, "-");
+  let trimmed = name.trim().replace(/[/\\?%*:|"<>]/g, "-");
+  // Защита от path traversal
+  trimmed = trimmed.replace(/\.\./g, "");
+  trimmed = trimmed.replace(/^\.+/, "");
   return trimmed || "file";
 }
 

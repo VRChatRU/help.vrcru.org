@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile, readFile, readdir, access } from "node:fs/promises";
+import { writeFile, readFile, access } from "node:fs/promises";
 import path from "node:path";
 import { constants } from "node:fs";
 import {
@@ -15,7 +15,6 @@ import {
 
 // Импорты новых модулей
 import type { EnvConfig, PageMeta, Templates, AuthorProfile, MentionInfo, AssetResult, RenderedMessage, MessageGroup } from './src/types';
-import { LRUCache } from './src/utils/cache';
 import { RateLimitedAPI } from './src/discord/api';
 import { getConfig, hasArg, TEMPLATES_DIR, DEFAULT_AUTHOR_COLOR, GROUP_WINDOW_MS } from './src/config';
 import {
@@ -44,7 +43,7 @@ import {
   isPublishableThread,
   isAnswerMessage
 } from './src/discord/permissions';
-import { loadTemplates, renderTemplate, buildMetaTags, buildIndexMeta, buildThreadMeta, buildIndexPage, ensureStyleAsset, readLocalMeta, generateSitemap } from './src/render/pages';
+import { loadTemplates, renderTemplate, buildMetaTags, buildIndexMeta, buildThreadMeta, buildIndexPage, readLocalMeta } from './src/render/pages';
 
 // Удалённые функции теперь импортируются из модулей
 
@@ -107,16 +106,6 @@ async function fetchAllMessages(thread: ThreadChannel): Promise<Message[]> {
   }
   messages.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
   return messages;
-}
-
-async function readLocalThreadIds(outputDir: string): Promise<string[]> {
-  const threadsDir = path.join(outputDir, "threads");
-  try {
-    const entries = await readdir(threadsDir, { withFileTypes: true });
-    return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
-  } catch {
-    return [];
-  }
 }
 
 async function rewriteInlineImages(params: {
@@ -799,7 +788,6 @@ async function buildThreadPage(params: {
   const pageRelPath = getThreadPageRelPath(thread.id);
   const pagePath = path.join(outputDir, pageRelPath);
   await ensureDir(path.dirname(pagePath));
-  await ensureStyleAsset(outputDir);
 
   // Настроить assets пути
   const assetsRoot = path.join(outputDir, "assets");
@@ -885,49 +873,6 @@ async function deleteThreadOutput(outputDir: string, threadId: string): Promise<
   await deleteDir(path.join(outputDir, "assets", threadId));
 }
 
-async function buildIndexPage(params: {
-  outputDir: string;
-  items: PageMeta[];
-  templates: Templates;
-  siteTitle: string;
-  siteDescription: string;
-}): Promise<void> {
-  await ensureStyleAsset(params.outputDir);
-  const items = params.items
-    .slice()
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-    .map((item) => {
-      const link = item.pageRelPath
-        .replace(/\\/g, "/")
-        .replace(/\/index\.html$/, "");
-      return `    <li>
-      <a href="${escapeHtml(link)}">${escapeHtml(item.title)}</a>
-      <time datetime="${toIsoString(item.createdAt)}">${escapeHtml(
-        item.createdAt.toLocaleString("ru-RU"),
-      )}</time>
-      <p>${escapeHtml(item.excerpt)}</p>
-    </li>`;
-    })
-    .join("\n");
-
-  const { descriptionTag } = buildMetaTags(params.siteDescription);
-  const { metaExtra } = buildIndexMeta({
-    title: params.siteTitle,
-    description: params.siteDescription,
-  });
-  const indexHtml = renderTemplate(params.templates.index, {
-    title: escapeHtml(params.siteTitle),
-    site_title: escapeHtml(params.siteTitle),
-    description_tag: descriptionTag,
-    meta_extra: metaExtra,
-    items,
-    updated_at: escapeHtml(formatDateTime(new Date())),
-    style_href: "assets/style.css",
-  });
-
-  await writeFile(path.join(params.outputDir, "index.html"), indexHtml, "utf8");
-}
-
 function isStarterMessage(message: Message): boolean {
   const channel = message.channel;
   return channel?.isThread?.() && message.id === channel.id;
@@ -1005,72 +950,10 @@ async function buildReplyHtml(params: {
 </div>`;
 }
 
-async function ensureStyleAsset(outputDir: string): Promise<void> {
-  const sourcePath = path.join(TEMPLATES_DIR, "style.css");
-  const style = await readFile(sourcePath, "utf8");
-  const targetDir = path.join(outputDir, "assets");
-  await ensureDir(targetDir);
-  await writeFile(path.join(targetDir, "style.css"), style, "utf8");
-}
-
-async function ensureRobotsAsset(outputDir: string): Promise<void> {
-  const sourcePath = path.join(TEMPLATES_DIR, "robots.txt");
-  let robots: string;
-  try {
-    robots = await readFile(sourcePath, "utf8");
-  } catch {
-    return;
-  }
-  const targetPath = path.join(outputDir, "robots.txt");
-  try {
-    await access(targetPath, constants.F_OK);
-    return;
-  } catch {
-    // Not present, write it.
-  }
-  await writeFile(targetPath, robots, "utf8");
-}
-
-async function readLocalMeta(outputDir: string): Promise<PageMeta[]> {
-  const threadsDir = path.join(outputDir, "threads");
-  try {
-    const dirents = await readdir(threadsDir, { withFileTypes: true });
-    const results: PageMeta[] = [];
-    for (const entry of dirents) {
-      if (!entry.isDirectory()) continue;
-      const metaPath = path.join(threadsDir, entry.name, "meta.json");
-      try {
-        const raw = await readFile(metaPath, "utf8");
-        const parsed = JSON.parse(raw) as {
-          threadId: string;
-          title: string;
-          createdAt: string;
-          excerpt: string;
-          pageRelPath: string;
-        };
-        results.push({
-          threadId: parsed.threadId,
-          title: parsed.title,
-          createdAt: new Date(parsed.createdAt),
-          excerpt: parsed.excerpt,
-          pageRelPath: parsed.pageRelPath,
-        });
-      } catch (error) {
-        console.warn("[meta] Failed to read", metaPath, error);
-      }
-    }
-    return results;
-  } catch {
-    return [];
-  }
-}
-
 async function run(): Promise<void> {
   const config = getConfig();
   await ensureDir(config.OUTPUT_DIR);
   const templates = await loadTemplates();
-  await ensureStyleAsset(config.OUTPUT_DIR);
-  await ensureRobotsAsset(config.OUTPUT_DIR);
   console.log("Output:", config.OUTPUT_DIR);
   const runRebuild = hasArg("--rebuild");
 

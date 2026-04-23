@@ -3,6 +3,7 @@ import {
   escapeHtml,
   truncateText,
   stripMarkdown,
+  normalizePlainLinks,
   sanitizeFilename,
   looksLikeImageFile,
   isDefaultColor
@@ -33,6 +34,23 @@ describe('Text Utils', () => {
       expect(stripMarkdown('**bold** *italic*')).toBe('bold italic');
       expect(stripMarkdown('[link](url)')).toBe('');
       expect(stripMarkdown('`code`')).toBe('');
+    });
+  });
+
+  describe('normalizePlainLinks', () => {
+    it('should convert bare URLs into markdown links', () => {
+      expect(normalizePlainLinks('Смотри https://example.com/test?q=1'))
+        .toBe('Смотри [https://example.com/test?q=1](https://example.com/test?q=1)');
+    });
+
+    it('should preserve existing markdown links and code spans', () => {
+      expect(normalizePlainLinks('[site](https://example.com) `https://example.com`'))
+        .toBe('[site](https://example.com) `https://example.com`');
+    });
+
+    it('should keep surrounding punctuation outside the generated link', () => {
+      expect(normalizePlainLinks('(https://example.com/path_(demo)).'))
+        .toBe('([https://example.com/path_(demo)](https://example.com/path_(demo))).');
     });
   });
 

@@ -63,6 +63,98 @@ export function normalizeGifLinks(text: string): string {
   return replaced.join("");
 }
 
+function countChar(text: string, char: string): number {
+  let total = 0;
+  for (const current of text) {
+    if (current === char) total += 1;
+  }
+  return total;
+}
+
+function splitTrailingUrlPunctuation(token: string): { url: string; suffix: string } {
+  let url = token;
+  let suffix = "";
+
+  while (url.length > 0) {
+    const last = url[url.length - 1];
+    if (!last) break;
+
+    if (/[.,!?;:'">]/.test(last)) {
+      suffix = last + suffix;
+      url = url.slice(0, -1);
+      continue;
+    }
+
+    if (last === ")" && countChar(url, "(") < countChar(url, ")")) {
+      suffix = last + suffix;
+      url = url.slice(0, -1);
+      continue;
+    }
+
+    if (last === "]" && countChar(url, "[") < countChar(url, "]")) {
+      suffix = last + suffix;
+      url = url.slice(0, -1);
+      continue;
+    }
+
+    if (last === "}" && countChar(url, "{") < countChar(url, "}")) {
+      suffix = last + suffix;
+      url = url.slice(0, -1);
+      continue;
+    }
+
+    break;
+  }
+
+  return { url, suffix };
+}
+
+function normalizeStandaloneUrlToken(token: string): string {
+  const match = token.match(/https?:\/\/\S+/i);
+  if (!match || match.index === undefined) return token;
+
+  const prefix = token.slice(0, match.index);
+  if (prefix && !/^[('"[{<]*$/.test(prefix)) return token;
+
+  const remainder = token.slice(match.index + match[0].length);
+  const { url, suffix } = splitTrailingUrlPunctuation(match[0]);
+  const trailing = suffix + remainder;
+
+  if (!url) return token;
+  if (prefix === "<" && trailing === ">") return token;
+  if (trailing && !/^[)\]}>.,!?;:'"]*$/.test(trailing)) return token;
+
+  return `${prefix}[${url}](${url})${trailing}`;
+}
+
+/**
+ * Делает "голые" URL кликабельными, не трогая код и уже размеченные markdown-ссылки
+ */
+export function normalizePlainLinks(text: string): string {
+  const protectedSegmentRegex = /(```[\s\S]*?```|`[^`\n]+`)/g;
+  let result = "";
+  let lastIndex = 0;
+
+  for (const match of text.matchAll(protectedSegmentRegex)) {
+    const index = match.index ?? 0;
+    const segment = text.slice(lastIndex, index);
+    result += segment
+      .split(/(\s+)/)
+      .map((token) => (/\s+/.test(token) ? token : normalizeStandaloneUrlToken(token)))
+      .join("");
+    result += match[0];
+    lastIndex = index + match[0].length;
+  }
+
+  const tail = text.slice(lastIndex);
+  result += tail
+    .split(/(\s+)/)
+    .map((token) => (/\s+/.test(token) ? token : normalizeStandaloneUrlToken(token)))
+    .join("");
+
+  return result;
+}
+
 /**
  * Очищает имя файла от недопустимых символов
  */

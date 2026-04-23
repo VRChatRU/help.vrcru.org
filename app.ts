@@ -23,6 +23,7 @@ import {
   truncateText,
   stripMarkdown,
   normalizeGifLinks,
+  normalizePlainLinks,
   sanitizeFilename,
   looksLikeImageFile,
   looksLikeVideoFile,
@@ -311,6 +312,7 @@ async function collectMessageAssets(params: {
   let markdown = message.content ?? "";
   markdown = markdown.replace(/(^|\n)\s*(\d+)\)\s+/g, "$1$2\\) ");
   markdown = normalizeGifLinks(markdown);
+  markdown = normalizePlainLinks(markdown);
   const replaced = replaceMentionsWithTokens({ text: markdown, mentionMap });
   markdown = replaced.text;
   markdown = await rewriteCustomEmojis({
